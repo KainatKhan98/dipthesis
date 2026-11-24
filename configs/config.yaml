@@ -1,0 +1,35 @@
+experiment:
+  seed: 42
+  image_size: [256, 256]         # [height, width] to keep PaDiM covariance memory Colab-safe
+  category: "sheet_metal"        # Week 1 single-category smoke test
+
+paths:
+  data_root: "/content/drive/MyDrive/datasets/mvtec_ad_2"
+  results_dir: "./results"
+
+preprocessing:
+  mode: "none"                   # Options: "none", "clahe", "bilateral", "clahe_bilateral"
+  clahe:
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+  bilateral:
+    d: 5
+    sigma_color: 50
+    sigma_space: 50
+
+lighting_shift:
+  condition: "original"          # Options: "original", "low_light", "overexposed", "uneven"
+  low_light_gamma: 2.2           # gamma > 1 darkens image
+  overexposed_gamma: 0.45        # gamma < 1 brightens image
+
+models:
+  hog_ocsvm:
+    orientations: 9
+    pixels_per_cell: [16, 16]
+    cells_per_block: [2, 2]
+    nu: 0.05
+    kernel: "rbf"
+  padim:
+    backbone: "resnet18"
+    layers: ["layer1", "layer2", "layer3"]
+    n_features: 100              # Random feature selection for lightweight covariance

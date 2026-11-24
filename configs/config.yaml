@@ -4,7 +4,7 @@ experiment:
   category: "sheet_metal"        # Week 1 single-category smoke test
 
 paths:
-  data_root: "/content/drive/MyDrive/datasets/mvtec_ad_2"
+  data_root: "/kaggle/input/datasets/kainatrizwankhan/mvtec-ad-2-private/mvtec_ad_2"
   results_dir: "./results"
 
 preprocessing:

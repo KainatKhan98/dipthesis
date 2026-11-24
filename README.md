@@ -5,6 +5,6 @@ Evaluating adaptive image preprocessing (CLAHE + Bilateral Filtering) combined w
 ## Setup
 1. Clone the repository and install dependencies:
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/KainatKhan98/dipthesis.git
    cd lighting-robust-ad
    pip install -r requirements.txt

@@ -9,7 +9,7 @@ from torchvision import models, transforms
 class PaDiM:
     """
     Lightweight Patch Distribution Modeling (PaDiM) using a frozen ResNet18 backbone
-    with random feature subsampling for resource-efficient anomaly detection.
+    with random feature subsampling and top-1% patch aggregation.
     """
 
     def __init__(self, backbone: str = "resnet18", layers: list = None,
@@ -19,7 +19,6 @@ class PaDiM:
         self.seed = seed
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Load pretrained ResNet18
         weights = models.ResNet18_Weights.DEFAULT
         self.model = models.resnet18(weights=weights).to(self.device)
         self.model.eval()
@@ -43,13 +42,11 @@ class PaDiM:
         return hook
 
     def _preprocess_batch(self, images: np.ndarray) -> torch.Tensor:
-        """Converts uint8 RGB array (N, H, W, 3) to normalized PyTorch tensor (N, 3, H, W)."""
         tensor = torch.from_numpy(images).permute(0, 3, 1, 2).float() / 255.0
         return self.normalize(tensor).to(self.device)
 
     @torch.no_grad()
     def _extract_embeddings(self, images: np.ndarray, batch_size: int = 16) -> torch.Tensor:
-        """Extracts concatenated multi-scale spatial patch embeddings (N, C_sub, H_p, W_p)."""
         all_embeddings = []
         for i in range(0, len(images), batch_size):
             batch = self._preprocess_batch(images[i:i + batch_size])
@@ -64,7 +61,7 @@ class PaDiM:
                     fmap = F.interpolate(fmap, size=(target_h, target_w), mode="bilinear", align_corners=False)
                 resized_maps.append(fmap)
 
-            concat = torch.cat(resized_maps, dim=1)  # (B, C_total, H_p, W_p)
+            concat = torch.cat(resized_maps, dim=1)
 
             if self.selected_indices is None:
                 total_c = concat.shape[1]
@@ -75,15 +72,14 @@ class PaDiM:
             concat = torch.index_select(concat, dim=1, index=self.selected_indices)
             all_embeddings.append(concat.cpu())
 
-        return torch.cat(all_embeddings, dim=0)  # (N, C_sub, H_p, W_p)
+        return torch.cat(all_embeddings, dim=0)
 
     def fit(self, train_images: np.ndarray, batch_size: int = 16):
-        """Estimates per-patch multivariate Gaussian parameters (mean & inverse covariance)."""
         embeddings = self._extract_embeddings(train_images, batch_size=batch_size)
         n, c, h_p, w_p = embeddings.shape
-        embeddings = embeddings.view(n, c, h_p * w_p).numpy()  # (N, C, P)
+        embeddings = embeddings.view(n, c, h_p * w_p).numpy()
 
-        self.means = np.mean(embeddings, axis=0)  # (C, P)
+        self.means = np.mean(embeddings, axis=0)
         self.inv_covs = np.zeros((h_p * w_p, c, c), dtype=np.float32)
         reg = 0.01 * np.eye(c, dtype=np.float32)
 
@@ -97,9 +93,7 @@ class PaDiM:
     def predict(self, test_images: np.ndarray, batch_size: int = 16) -> tuple:
         """
         Computes Mahalanobis distance maps upsampled to input resolution.
-        Returns:
-            image_scores: 1D array (N,) max anomaly score per image
-            anomaly_maps: 3D array (N, H, W)
+        Uses top-1% spatial patch mean for image-level scoring to suppress isolated glare spikes.
         """
         h_img, w_img = test_images.shape[1], test_images.shape[2]
         embeddings = self._extract_embeddings(test_images, batch_size=batch_size)
@@ -108,7 +102,7 @@ class PaDiM:
 
         dist_maps = np.zeros((n, h_p * w_p), dtype=np.float32)
         for p in range(h_p * w_p):
-            delta = embeddings[:, :, p] - self.means[:, p]  # (N, C)
+            delta = embeddings[:, :, p] - self.means[:, p]
             dist_sq = np.sum((delta @ self.inv_covs[p]) * delta, axis=1)
             dist_maps[:, p] = np.sqrt(np.maximum(dist_sq, 0.0))
 
@@ -117,9 +111,13 @@ class PaDiM:
         upsampled = F.interpolate(dist_tensor, size=(h_img, w_img), mode="bilinear", align_corners=False)
         upsampled = upsampled.squeeze(1).numpy()
 
-        # Apply light Gaussian smoothing per PaDiM standard practice
         anomaly_maps = np.array([gaussian_filter(m, sigma=4) for m in upsampled], dtype=np.float32)
-        image_scores = np.max(anomaly_maps.reshape(n, -1), axis=1)
+
+        # Top-1% pixel aggregation instead of single noisy maximum
+        flat_maps = anomaly_maps.reshape(n, -1)
+        top_k = max(1, int(0.01 * flat_maps.shape[1]))
+        image_scores = np.mean(np.sort(flat_maps, axis=1)[:, -top_k:], axis=1)
+
         return image_scores, anomaly_maps
 
     def save(self, filepath: str):

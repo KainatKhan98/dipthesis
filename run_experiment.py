@@ -6,6 +6,8 @@ import numpy as np
 import torch
 import yaml
 
+
+from src.evaluation.visualize import save_localization_comparison, save_preprocessing_grid
 from src.data.data import load_mvtec_ad2_category
 from src.evaluation.metrics import (
     compute_image_metrics,
@@ -99,6 +101,16 @@ def run(cfg: dict, model_name: str):
         if not file_exists:
             writer.writeheader()
         writer.writerow(row)
+        
+    # Save 4x4 lighting vs. preprocessing grid once per category
+    fig_dir = os.path.join(cfg["paths"]["results_dir"], "figures")
+    grid_path = os.path.join(fig_dir, f"preprocessing_grid_{category}.png")
+    if not os.path.exists(grid_path):
+        defect_idx = np.where(y_true == 1)[0]
+        sample_idx = defect_idx[0] if len(defect_idx) > 0 else 0
+        # Load raw unshifted sample from test_imgs when lighting=='original' & prep=='none'
+        if light_cond == "original" and prep_mode == "none":
+            save_preprocessing_grid(test_imgs[sample_idx], grid_path, category=category)
 
 
 if __name__ == "__main__":
